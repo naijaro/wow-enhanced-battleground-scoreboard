@@ -1,0 +1,7 @@
+## Interface: 30300
+## Title: Enhanced Battleground Scoreboard
+## Notes: Adds a class icon, class-colored name, class name, level, and a self marker to each row of the end-of-battleground scoreboard.
+## Author: MaxQuest aka Naijaro
+## Version: 1.0
+
+EnhancedBattlegroundScoreboard.lua
