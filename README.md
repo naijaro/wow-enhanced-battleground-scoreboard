@@ -32,7 +32,8 @@ It should also work on:
 
 ## Installation
 
-1. Download or clone this repository.
-2. Copy the addon folder into your `Interface/AddOns` directory.
-3. Launch the game (or reload your UI with `/reload`).
-4. Join a battleground and press **Tab** to open the scoreboard.
+1. Navigate to [releases](https://github.com/naijaro/wow-enhanced-battleground-scoreboard/releases)
+2. Download the latest EnhancedBattlegroundScoreboard.zip
+3. Unzip it into your `Interface/AddOns` directory.
+4. Launch the game (or reload your UI with `/reload`).
+5. Join a battleground and press **Tab** to open the scoreboard.
