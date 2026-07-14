@@ -2,18 +2,23 @@
 -- Adds a class icon, class-colored name, class name, level, and a self marker
 -- to each row of the end-of-battleground scoreboard,
 -- e.g. "[icon] Narenthes (necromancer, 19)".
--- e.g. "[icon] Reverie (choronomancer, 19)".
+-- e.g. "[icon] Reverie (chronomancer, 19)".
 
--- Level is hidden at max level.
-local MAX_LEVEL = 60
+-- Level is hidden at max level. Set MAX_LEVEL_OVERRIDE to a number to force a
+-- specific cap; leave nil to auto-detect (60 on Conquest of Azeroth, otherwise
+-- the client's reported cap, e.g. 80 on stock WotLK).
+local MAX_LEVEL_OVERRIDE = nil
 
--- Class icon atlas (patch-A override of the character-create classes sheet).
--- 8 columns x 4 rows; cells are keyed by lowercase class display name.
+-- Class icon atlas. Both layouts share the same texture file:
+--   * Conquest of Azeroth: patch-A overrides it with a custom 8x4 sheet.
+--   * Stock WotLK: the standard 4x4 sheet of the 10 original classes.
+-- Cells are keyed by lowercase class display name; the active layout is chosen
+-- by auto-detection (see coa_detect below).
 local ICON_ATLAS = "Interface\\GLUES\\CHARACTERCREATE\\UI-CHARACTERCREATE-CLASSES"
 local ICON_SIZE = 14 -- pixel height/width of the inline icon
-local ATLAS_COLS, ATLAS_ROWS = 8, 4
 
-local CLASS_CELL = {
+-- Conquest of Azeroth layout: 8 columns x 4 rows, {col, row} zero-based.
+local COA_CELL = {
 	-- row 0
 	["barbarian"] = { 0, 0 }, ["chronomancer"] = { 1, 0 }, ["cultist"] = { 2, 0 },
 	["death knight"] = { 3, 0 }, ["felsworn"] = { 4, 0 }, ["druid"] = { 5, 0 },
@@ -32,19 +37,115 @@ local CLASS_CELL = {
 	["witch doctor"] = { 6, 3 }, ["witch hunter"] = { 7, 3 },
 }
 
-local CELL_W = 256 / ATLAS_COLS -- declared texel width per cell (256px atlas space)
-local CELL_H = 256 / ATLAS_ROWS
+-- Standard WotLK layout: 4 columns x 4 rows, {col, row} zero-based.
+local STD_CELL = {
+	["warrior"] = { 0, 0 }, ["mage"] = { 1, 0 }, ["rogue"] = { 2, 0 }, ["druid"] = { 3, 0 },
+	["hunter"] = { 0, 1 }, ["shaman"] = { 1, 1 }, ["priest"] = { 2, 1 }, ["warlock"] = { 3, 1 },
+	["paladin"] = { 0, 2 }, ["death knight"] = { 1, 2 },
+}
+
+-- Normalize a class token/name for signature matching: upper-case, letters and
+-- digits only (so "Death Knight" -> "DEATHKNIGHT").
+local function coa_normalize(s)
+	if type(s) ~= "string" then
+		return ""
+	end
+	return (s:upper():gsub("[^A-Z0-9]", ""))
+end
+
+-- Signature classes that (as far as we know) only exist on Ascension /
+-- Conquest of Azeroth. Their presence in the client's class list is a strong
+-- signal that the custom 8x4 atlas is in use.
+local COA_SIGNATURE = {
+	NECROMANCER  = true,
+	CHRONOMANCER = true,
+	VENOMANCER   = true,
+}
+
+local coa_active -- cached auto-detect result: nil = not yet decided
+local function coa_detect()
+	-- Scan every source that might list class tokens or localized class names.
+	local tables = {
+		_G.LOCALIZED_CLASS_NAMES_MALE,
+		_G.LOCALIZED_CLASS_NAMES_FEMALE,
+		_G.CLASS_ICON_TCOORDS,
+		_G.RAID_CLASS_COLORS,
+	}
+	for _, tbl in ipairs(tables) do
+		if type(tbl) == "table" then
+			for k, v in pairs(tbl) do
+				if type(k) == "string" and COA_SIGNATURE[coa_normalize(k)] then
+					return true
+				end
+				if type(v) == "string" and COA_SIGNATURE[coa_normalize(v)] then
+					return true
+				end
+			end
+		end
+	end
+	if type(_G.CLASS_SORT_ORDER) == "table" then
+		for _, tok in ipairs(_G.CLASS_SORT_ORDER) do
+			if type(tok) == "string" and COA_SIGNATURE[coa_normalize(tok)] then
+				return true
+			end
+		end
+	end
+	return false
+end
+
+-- Returns the active cell table plus its column/row counts, detecting the
+-- layout once on first use.
+local function ClassLayout()
+	if coa_active == nil then
+		coa_active = coa_detect()
+	end
+	if coa_active then
+		return COA_CELL, 8, 4
+	end
+	return STD_CELL, 4, 4
+end
+
+-- Max level: manual override if set, else 60 when Conquest of Azeroth is
+-- detected (its custom cap), else the client's reported cap (80 on stock
+-- WotLK). Cached after first use.
+local maxLevel
+local function MaxLevel()
+	if maxLevel then
+		return maxLevel
+	end
+	if type(MAX_LEVEL_OVERRIDE) == "number" then
+		maxLevel = MAX_LEVEL_OVERRIDE
+		return maxLevel
+	end
+	ClassLayout() -- ensure coa_active is populated
+	if coa_active then
+		maxLevel = 60
+	elseif type(GetMaxPlayerLevel) == "function" then
+		local m = GetMaxPlayerLevel()
+		maxLevel = (type(m) == "number" and m > 0) and m or 80
+	elseif type(MAX_PLAYER_LEVEL) == "number" and MAX_PLAYER_LEVEL > 0 then
+		maxLevel = MAX_PLAYER_LEVEL
+	else
+		maxLevel = 80
+	end
+	return maxLevel
+end
 
 local function ClassIcon(className)
-	local cell = className and CLASS_CELL[string.lower(className)]
+	if not className then
+		return nil
+	end
+	local cells, cols, rows = ClassLayout()
+	local cell = cells[string.lower(className)]
 	if not cell then
 		return nil
 	end
 	local c, r = cell[1], cell[2]
+	local cw, ch = 256 / cols, 256 / rows
 	return string.format(
 		"|T%s:%d:%d:0:0:256:256:%d:%d:%d:%d|t",
 		ICON_ATLAS, ICON_SIZE, ICON_SIZE,
-		c * CELL_W, (c + 1) * CELL_W, r * CELL_H, (r + 1) * CELL_H
+		c * cw, (c + 1) * cw, r * ch, (r + 1) * ch
 	)
 end
 
@@ -186,7 +287,7 @@ local function UpdateScoreNames()
 				if region then
 					local inner = string.lower(class or "?")
 					local lvl = LevelForName(name)
-					if lvl and lvl > 0 and lvl ~= MAX_LEVEL then
+					if lvl and lvl > 0 and lvl ~= MaxLevel() then
 						inner = string.format("%s, %d", inner, lvl)
 					end
 					local tag = "(" .. inner .. ")"
@@ -254,6 +355,9 @@ SlashCmdList["EBS"] = function(msg)
 		return
 	end
 	p("|cff33ff99EnhancedBattlegroundScoreboard|r diagnostics:")
+	ClassLayout() -- ensure detection has run
+	p("  Class atlas:", coa_active and "Conquest of Azeroth (8x4)" or "standard WotLK (4x4)")
+	p("  Max level (level hidden at):", tostring(MaxLevel()))
 	p("  WorldStateScoreFrame:", WorldStateScoreFrame and "exists" or "MISSING")
 	p("  WorldStateScoreFrame_Update:", type(WorldStateScoreFrame_Update))
 	p("  GetNumBattlefieldScores:", tostring(GetNumBattlefieldScores and GetNumBattlefieldScores()))
