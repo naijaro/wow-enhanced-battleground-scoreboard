@@ -79,7 +79,7 @@ end
 local function RecordUnitLevel(unit)
 	if unit and UnitExists(unit) and UnitIsPlayer(unit) then
 		local n, l = UnitName(unit), UnitLevel(unit)
-		if n and l and l > 0 then
+		if n and type(l) == "number" and l > 0 then
 			levelCache[n] = l
 		end
 	end
@@ -96,6 +96,15 @@ end
 -- The class token from GetBattlefieldScore may be a custom Ascension class
 -- (e.g. CULTIST) that isn't in RAID_CLASS_COLORS. Prefer the standard color,
 -- otherwise reuse whatever color the name FontString already displays.
+local function ColorChannel(v)
+	v = tonumber(v)
+	if not v then
+		v = 1
+	end
+	if v < 0 then v = 0 elseif v > 1 then v = 1 end
+	return math.floor(v * 255 + 0.5)
+end
+
 local function ColorHex(classToken, region)
 	local c = RAID_CLASS_COLORS and classToken and RAID_CLASS_COLORS[classToken]
 	local r, g, b
@@ -104,16 +113,14 @@ local function ColorHex(classToken, region)
 	elseif region and region.GetTextColor then
 		r, g, b = region:GetTextColor()
 	end
-	if not r then
-		r, g, b = 1, 1, 1
-	end
-	return string.format("ff%02x%02x%02x", r * 255, g * 255, b * 255)
+	return string.format("ff%02x%02x%02x", ColorChannel(r), ColorChannel(g), ColorChannel(b))
 end
 
 -- Cache: for each scoreboard row button, remember which FontString holds the
 -- player name so we don't have to rediscover it (and so it survives our own
--- edits, which change the visible text).
-local nameRegions = {}
+-- edits, which change the visible text). Weak keys let any button that is ever
+-- discarded be garbage collected instead of pinned by this table.
+local nameRegions = setmetatable({}, { __mode = "k" })
 
 -- The name text is not always a direct region of the row button (on Ascension
 -- it lives in a nested child frame), so search descendants recursively.
@@ -221,6 +228,7 @@ driver:SetScript("OnEvent", function(self, event)
 		RecordUnitLevel("mouseover")
 	elseif event == "PLAYER_ENTERING_WORLD" then
 		wipe(levelCache)
+		wipe(nameRegions)
 	end
 end)
 driver:SetScript("OnUpdate", function()
@@ -230,12 +238,17 @@ driver:SetScript("OnUpdate", function()
 	end
 end)
 
--- Diagnostics: type /ebs debug while the scoreboard is open, to print the diagnostic output
+-- Diagnostics: type /ebs debug while the scoreboard is open, paste me the output.
 SLASH_EBS1 = "/ebs"
 SlashCmdList["EBS"] = function(msg)
 	msg = string.lower(msg or "")
 	msg = msg:gsub("^%s+", ""):gsub("%s+$", "")
-	local function p(...) DEFAULT_CHAT_FRAME:AddMessage(table.concat({ ... }, " ")) end
+	local cf = DEFAULT_CHAT_FRAME or ChatFrame1
+	local function p(...)
+		if cf then
+			cf:AddMessage(table.concat({ ... }, " "))
+		end
+	end
 	if msg ~= "debug" then
 		p("|cff33ff99EnhancedBattlegroundScoreboard|r: type /ebs debug for diagnostics.")
 		return
