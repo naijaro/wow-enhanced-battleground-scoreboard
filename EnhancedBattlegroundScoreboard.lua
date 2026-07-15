@@ -44,6 +44,16 @@ local STD_CELL = {
 	["paladin"] = { 0, 2 }, ["death knight"] = { 1, 2 },
 }
 
+-- Class names that appear only in the CoA layout (every COA_CELL key that is not
+-- also a standard class). Seeing one of these in the live scoreboard proves the
+-- custom atlas is active; used to reinforce auto-detection at runtime.
+local COA_EXCLUSIVE_CLASS_NAMES = {}
+for key in pairs(COA_CELL) do
+	if not STD_CELL[key] then
+		COA_EXCLUSIVE_CLASS_NAMES[key] = true
+	end
+end
+
 -- Normalize a class token/name for signature matching: upper-case, letters and
 -- digits only (so "Death Knight" -> "DEATHKNIGHT").
 local function coa_normalize(s)
@@ -129,6 +139,23 @@ local function MaxLevel()
 		maxLevel = 80
 	end
 	return maxLevel
+end
+
+-- Runtime reinforcement of the initial auto-detection. coa_detect() is a best
+-- guess from the client's class globals; if the scoreboard actually reports a
+-- CoA-exclusive class, that is authoritative, so lock CoA in. One-directional:
+-- we never switch back, since a stock client never reports these classes.
+-- Returns true only when this call is what switched the layout to CoA.
+local function ConfirmCoALayoutFromClass(className)
+	if coa_active then
+		return false
+	end
+	if className and COA_EXCLUSIVE_CLASS_NAMES[string.lower(className)] then
+		coa_active = true
+		maxLevel = nil -- recompute the cap now that we know it is CoA (60)
+		return true
+	end
+	return false
 end
 
 local function ClassIcon(className)
@@ -273,6 +300,7 @@ local function UpdateScoreNames()
 		offset = FauxScrollFrame_GetOffset(WorldStateScoreScrollFrame) or 0
 	end
 
+	local layoutSwitchedToCoA = false
 	local i = 1
 	while true do
 		local button = _G["WorldStateScoreButton" .. i]
@@ -283,6 +311,9 @@ local function UpdateScoreNames()
 		if index <= numScores then
 			local name, _, _, _, _, _, _, _, class, classToken = GetBattlefieldScore(index)
 			if name then
+				if ConfirmCoALayoutFromClass(class) then
+					layoutSwitchedToCoA = true
+				end
 				local region = GetNameRegion(button, name)
 				if region then
 					local inner = string.lower(class or "?")
@@ -304,6 +335,14 @@ local function UpdateScoreNames()
 			end
 		end
 		i = i + 1
+	end
+
+	-- If a CoA-exclusive class proved the layout mid-pass, re-render once (still
+	-- synchronous, before the frame paints) so every row -- including standard
+	-- classes already drawn with the wrong atlas -- uses the correct cells.
+	-- Safe from recursion: coa_active is now true, so no further switch occurs.
+	if layoutSwitchedToCoA then
+		return UpdateScoreNames()
 	end
 end
 
