@@ -4,6 +4,19 @@
 -- e.g. "[icon] Narenthes (necromancer, 19)".
 -- e.g. "[icon] Reverie (chronomancer, 19)".
 
+-- The addon's folder name, provided by WoW as the first vararg to this file.
+-- Deriving media paths from it keeps them working if the folder is ever renamed.
+local ADDON_NAME = ...
+
+-- Returns the addon folder name, or a literal fallback if the vararg is not a
+-- string (only possible if this file is run outside normal addon loading).
+local function getAddonName()
+	if type(ADDON_NAME) == "string" then
+		return ADDON_NAME
+	end
+	return "EnhancedBattlegroundScoreboard"
+end
+
 -- Level is hidden at max level. Set MAX_LEVEL_OVERRIDE to a number to force a
 -- specific cap; leave nil to auto-detect (60 on Conquest of Azeroth, otherwise
 -- the client's reported cap, e.g. 80 on stock WotLK).
@@ -16,6 +29,11 @@ local MAX_LEVEL_OVERRIDE = nil
 -- by auto-detection (see coa_detect below).
 local ICON_ATLAS = "Interface\\GLUES\\CHARACTERCREATE\\UI-CHARACTERCREATE-CLASSES"
 local ICON_SIZE = 14 -- pixel height/width of the inline icon
+
+-- Self marker star texture shipped with the addon. Path derived from the folder
+-- name so it survives a folder rename.
+local STAR_TEXTURE = "Interface\\AddOns\\" .. getAddonName() .. "\\star.tga"
+local STAR_ICON = "|T" .. STAR_TEXTURE .. ":0|t"
 
 -- Conquest of Azeroth layout: 8 columns x 4 rows, {col, row} zero-based.
 local COA_CELL = {
@@ -323,7 +341,7 @@ local function UpdateScoreNames()
 					end
 					local tag = "(" .. inner .. ")"
 					if name == UnitName("player") then
-						tag = tag .. " |TInterface\\AddOns\\EnhancedBattlegroundScoreboard\\star.tga:0|t"
+						tag = tag .. " " .. STAR_ICON
 					end
 					local icon = ClassIcon(class)
 					region:SetText(string.format(
@@ -362,7 +380,7 @@ local function Preload(path)
 	preloaded[#preloaded + 1] = t -- keep a reference so it is never collected
 end
 Preload(ICON_ATLAS)
-Preload("Interface\\AddOns\\EnhancedBattlegroundScoreboard\\star.tga")
+Preload(STAR_TEXTURE)
 
 -- Primary path: runs right after Blizzard repopulates the scoreboard.
 if type(WorldStateScoreFrame_Update) == "function" then
