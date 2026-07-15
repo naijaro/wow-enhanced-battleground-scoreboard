@@ -307,6 +307,24 @@ local function UpdateScoreNames()
 	end
 end
 
+-- Keep the icon textures resident in memory. Inline |T...|t escapes render as
+-- raw text (e.g. "|TInterface\GLUES\...|") until their texture has finished
+-- loading; the class atlas streams from patch-A.MPQ, so on a cold client it can
+-- briefly show as text before appearing. A persistent 1px, fully transparent
+-- texture that references each path forces the client to load and hold it.
+local preloaded = {}
+local function Preload(path)
+	local t = UIParent:CreateTexture(nil, "BACKGROUND")
+	t:SetTexture(path)
+	t:SetWidth(1)
+	t:SetHeight(1)
+	t:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 0, 0)
+	t:SetAlpha(0)
+	preloaded[#preloaded + 1] = t -- keep a reference so it is never collected
+end
+Preload(ICON_ATLAS)
+Preload("Interface\\AddOns\\EnhancedBattlegroundScoreboard\\star.tga")
+
 -- Primary path: runs right after Blizzard repopulates the scoreboard.
 if type(WorldStateScoreFrame_Update) == "function" then
 	hooksecurefunc("WorldStateScoreFrame_Update", UpdateScoreNames)
