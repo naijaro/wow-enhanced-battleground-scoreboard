@@ -25,8 +25,9 @@ local MAX_LEVEL_OVERRIDE = nil
 -- Class icon atlas. Both layouts share the same texture file:
 --   * Conquest of Azeroth: patch-A overrides it with a custom 8x4 sheet.
 --   * Stock WotLK: the standard 4x4 sheet of the 10 original classes.
--- Cells are keyed by lowercase class display name; the active layout is chosen
--- by auto-detection (see coa_detect below).
+-- Cells are authored keyed by lowercase class display name (readable); a
+-- token-keyed copy is derived for locale-independent lookup. The active layout
+-- is chosen by auto-detection (see coa_detect below).
 local ICON_ATLAS = "Interface\\GLUES\\CHARACTERCREATE\\UI-CHARACTERCREATE-CLASSES"
 local ICON_SIZE = 14 -- pixel height/width of the inline icon
 
@@ -81,6 +82,51 @@ local function coa_normalize(s)
 	return (s:upper():gsub("[^A-Z0-9]", ""))
 end
 
+-- GetBattlefieldScore reports a locale-independent class token (e.g.
+-- "DEATHKNIGHT"), whereas the class *name* is localized. Icons must key off the
+-- token so they work on non-English clients. These are token-keyed copies of
+-- the name tables above; the normalized token equals the normalized English
+-- name ("DEATHKNIGHT" == normalize("Death Knight")), so the mapping lines up.
+local function ByNormalizedToken(nameTable)
+	local out = {}
+	for name, cell in pairs(nameTable) do
+		out[coa_normalize(name)] = cell
+	end
+	return out
+end
+local COA_CELL_BY_TOKEN = ByNormalizedToken(COA_CELL)
+local STD_CELL_BY_TOKEN = ByNormalizedToken(STD_CELL)
+
+-- Several CoA classes report a legacy/internal class token that does NOT match
+-- their display name (discovered via /ebs classtokens), so normalizing the name
+-- is not enough to reach them. Map each such token to its display-name key.
+-- (HERO is an unused placeholder class and is intentionally left without art.)
+local COA_TOKEN_ALIASES = {
+	SONOFARUGAL = "bloodmage",
+	PROPHET     = "venomancer",
+	WILDWALKER  = "primalist",
+	MONK        = "templar",
+	SPIRITMAGE  = "runemaster",
+	FLESHWARDEN = "knight of xoroth",
+	DEMONHUNTER = "felsworn",
+}
+for token, nameKey in pairs(COA_TOKEN_ALIASES) do
+	local cell = COA_CELL[nameKey]
+	if cell then
+		COA_CELL_BY_TOKEN[coa_normalize(token)] = cell
+	end
+end
+
+-- CoA-exclusive set keyed by normalized token, for locale-independent runtime
+-- reinforcement. Includes the alias tokens above, which are all CoA-only.
+local COA_EXCLUSIVE_TOKENS = {}
+for name in pairs(COA_EXCLUSIVE_CLASS_NAMES) do
+	COA_EXCLUSIVE_TOKENS[coa_normalize(name)] = true
+end
+for token in pairs(COA_TOKEN_ALIASES) do
+	COA_EXCLUSIVE_TOKENS[coa_normalize(token)] = true
+end
+
 -- Signature classes that (as far as we know) only exist on Ascension /
 -- Conquest of Azeroth. Their presence in the client's class list is a strong
 -- signal that the custom 8x4 atlas is in use.
@@ -121,16 +167,16 @@ local function coa_detect()
 	return false
 end
 
--- Returns the active cell table plus its column/row counts, detecting the
--- layout once on first use.
+-- Returns the active layout: token-keyed cells, name-keyed cells (fallback),
+-- and its column/row counts. Detects the layout once on first use.
 local function ClassLayout()
 	if coa_active == nil then
 		coa_active = coa_detect()
 	end
 	if coa_active then
-		return COA_CELL, 8, 4
+		return COA_CELL_BY_TOKEN, COA_CELL, 8, 4
 	end
-	return STD_CELL, 4, 4
+	return STD_CELL_BY_TOKEN, STD_CELL, 4, 4
 end
 
 -- Max level: manual override if set, else 60 when Conquest of Azeroth is
@@ -164,11 +210,14 @@ end
 -- CoA-exclusive class, that is authoritative, so lock CoA in. One-directional:
 -- we never switch back, since a stock client never reports these classes.
 -- Returns true only when this call is what switched the layout to CoA.
-local function ConfirmCoALayoutFromClass(className)
+local function ConfirmCoALayoutFromClass(classToken, className)
 	if coa_active then
 		return false
 	end
-	if className and COA_EXCLUSIVE_CLASS_NAMES[string.lower(className)] then
+	local isCoAExclusive =
+		(classToken and COA_EXCLUSIVE_TOKENS[coa_normalize(classToken)]) or
+		(className and COA_EXCLUSIVE_CLASS_NAMES[string.lower(className)])
+	if isCoAExclusive then
 		coa_active = true
 		maxLevel = nil -- recompute the cap now that we know it is CoA (60)
 		return true
@@ -176,12 +225,15 @@ local function ConfirmCoALayoutFromClass(className)
 	return false
 end
 
-local function ClassIcon(className)
-	if not className then
-		return nil
+local function ClassIcon(classToken, className)
+	local tokenCells, nameCells, cols, rows = ClassLayout()
+	local cell
+	if classToken then
+		cell = tokenCells[coa_normalize(classToken)]
 	end
-	local cells, cols, rows = ClassLayout()
-	local cell = cells[string.lower(className)]
+	if not cell and className then
+		cell = nameCells[string.lower(className)] -- fallback (English clients)
+	end
 	if not cell then
 		return nil
 	end
@@ -329,7 +381,7 @@ local function UpdateScoreNames()
 		if index <= numScores then
 			local name, _, _, _, _, _, _, _, class, classToken = GetBattlefieldScore(index)
 			if name then
-				if ConfirmCoALayoutFromClass(class) then
+				if ConfirmCoALayoutFromClass(classToken, class) then
 					layoutSwitchedToCoA = true
 				end
 				local region = GetNameRegion(button, name)
@@ -343,7 +395,7 @@ local function UpdateScoreNames()
 					if name == UnitName("player") then
 						tag = tag .. " " .. STAR_ICON
 					end
-					local icon = ClassIcon(class)
+					local icon = ClassIcon(classToken, class)
 					region:SetText(string.format(
 						"%s|c%s%s|r |cffb0b0b0%s|r",
 						icon and (icon .. " ") or "",
@@ -414,7 +466,9 @@ driver:SetScript("OnUpdate", function()
 	end
 end)
 
--- Diagnostics: type /ebs debug while the scoreboard is open, paste me the output.
+-- Slash commands:
+--   /ebs debug        - dump diagnostics (run with the scoreboard open)
+--   /ebs classtokens  - list every class token the client knows about
 SLASH_EBS1 = "/ebs"
 SlashCmdList["EBS"] = function(msg)
 	msg = string.lower(msg or "")
@@ -425,8 +479,41 @@ SlashCmdList["EBS"] = function(msg)
 			cf:AddMessage(table.concat({ ... }, " "))
 		end
 	end
+
+	if msg == "classtokens" then
+		p("|cff33ff99EnhancedBattlegroundScoreboard|r class tokens:")
+		local seen = {}
+		local count = 0
+		local function report(token)
+			if type(token) ~= "string" or seen[token] then
+				return
+			end
+			seen[token] = true
+			count = count + 1
+			local name = LOCALIZED_CLASS_NAMES_MALE and LOCALIZED_CLASS_NAMES_MALE[token]
+			local haveIcon = COA_CELL_BY_TOKEN[coa_normalize(token)]
+				or STD_CELL_BY_TOKEN[coa_normalize(token)]
+			p("  " .. token .. " = " .. tostring(name) .. (haveIcon and "" or " |cffff5555(no icon)|r"))
+		end
+		for _, tbl in ipairs({ LOCALIZED_CLASS_NAMES_MALE, LOCALIZED_CLASS_NAMES_FEMALE,
+			RAID_CLASS_COLORS, CLASS_ICON_TCOORDS }) do
+			if type(tbl) == "table" then
+				for k in pairs(tbl) do
+					report(k)
+				end
+			end
+		end
+		if type(CLASS_SORT_ORDER) == "table" then
+			for _, tok in ipairs(CLASS_SORT_ORDER) do
+				report(tok)
+			end
+		end
+		p("  (" .. count .. " tokens total)")
+		return
+	end
+
 	if msg ~= "debug" then
-		p("|cff33ff99EnhancedBattlegroundScoreboard|r: type /ebs debug for diagnostics.")
+		p("|cff33ff99EnhancedBattlegroundScoreboard|r: /ebs debug (diagnostics) | /ebs classtokens (list class tokens)")
 		return
 	end
 	p("|cff33ff99EnhancedBattlegroundScoreboard|r diagnostics:")
