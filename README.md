@@ -1,6 +1,6 @@
 # EnhancedBattlegroundScoreboard
 
-A lightweight World of Warcraft addon that enhances the default battleground scoreboard by making player classes instantly recognizable.
+A lightweight World of Warcraft (WotLK / Ascension / CoA) addon that enhances the default battleground scoreboard by making player classes instantly recognizable.
 
 ## Features
 
@@ -32,10 +32,10 @@ It should also work on:
 
 ## Installation
 
-1. Navigate to [releases](https://github.com/naijaro/wow-enhanced-battleground-scoreboard/releases)
+1. Navigate to [releases](https://github.com/naijaro/EnhancedBattlegroundScoreboard/releases)
 2. Download the latest EnhancedBattlegroundScoreboard.zip
 3. Unzip it into your `Interface/AddOns` directory.
 4. Launch the game (or reload your UI with `/reload`).
 5. Join a battleground and press **Tab** to open the scoreboard.
 
-Note: if you download source instead of releases, make sure to name addon folder EnhancedBattlegroundScoreboard (it should match the lua file inside)
+Note: make sure that addon folder is EnhancedBattlegroundScoreboard (since it should match the toc/lua files inside)
